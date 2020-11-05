@@ -14,6 +14,10 @@ def determine_all_events(direct_succession):
     return determine_all_successors(direct_succession).union(direct_succession.keys())
 
 
+def determine_all_events_from_log(log):
+    return set([item for sublist in log for item in sublist])
+
+
 def determine_end_set_events(direct_succession):
     return determine_all_events(direct_succession) - direct_succession.keys()
 
@@ -23,13 +27,14 @@ def determine_start_set_events(direct_succession):
 
 
 # a -> b <=> ...ab... and not ...ba...
-def calculate_causality(direct_succession):
+def calculate_causality(direct_succession, sequences):
     causality = {}
     events = determine_all_events(direct_succession)
     for event1 in events:
         for event2 in events:
             if event1 in direct_succession.keys() and event2 in direct_succession[event1]:
-                if event2 not in direct_succession.keys() or event1 not in direct_succession[event2]:
+                if (event2 not in direct_succession.keys() or event1 not in direct_succession[event2]) or \
+                        (event1 in sequences.keys() and event2 in sequences[event1]):
                     if event1 not in causality.keys():
                         causality[event1] = set()
                     causality[event1].add(event2)
@@ -37,14 +42,15 @@ def calculate_causality(direct_succession):
 
 
 # a || b <=>
-def calculate_parallel_event(direct_succession):
+def calculate_parallel_event(direct_succession, sequences):
     parallel_events = set()
     events = determine_all_events(direct_succession)
     for event1 in events:
         for event2 in events:
             if event1 in direct_succession.keys() and event2 in direct_succession[event1]:
                 if event2 in direct_succession.keys() and event1 in direct_succession[event2]:
-                    parallel_events.add((event1, event2))
+                    if event1 in sequences.keys() and event2 not in sequences[event1]:
+                        parallel_events.add((event1, event2))
     return parallel_events
 
 
@@ -95,11 +101,35 @@ def calculate_direct_succession(log):
     return direct_succession
 
 
+def calculate_short_loops(log):
+    events_in_short_loops = {}
+    for trace in log:
+        idx = 0
+        while idx < len(trace) - 1:
+            if trace[idx] == trace[idx + 1]:
+                previous = trace[idx - 1]
+                i = idx
+                # TODO border cases (aaax, xaaa)
+                while trace[i] == trace[idx]:
+                    i += 1
+                next = trace[i]
+                if trace[idx] not in events_in_short_loops.keys():
+                    events_in_short_loops[trace[idx]] = set()
+                events_in_short_loops[trace[idx]].add((previous, next))
+                idx = i
+            else:
+                idx += 1
+    return events_in_short_loops
+
+
 if __name__ == '__main__':
     log = [
         ['x', 'a', 'y'],
         ['x', 'a', 'b', 'a', 'y'],
         ['x', 'a', 'b', 'a', 'b', 'a', 'y'],
+        ['x', 'a', 'a', 'a', 'y'],
+        ['x', 'a', 'a', 'y'],
+        ['x', 'y'],
     ]
 
     # log = [
@@ -111,9 +141,6 @@ if __name__ == '__main__':
 
     direct_successions = calculate_direct_succession(log)
 
-    causality = calculate_causality(direct_successions)
-    parallel_events = calculate_parallel_event(direct_successions)
-
     start_set_events = determine_start_set_events(direct_successions)
     end_set_events = determine_end_set_events(direct_successions)
 
@@ -121,6 +148,12 @@ if __name__ == '__main__':
     print(subsequences)
     sequences = calculate_sequences(log)
     print(sequences)
+
+    short_loops = calculate_short_loops(log)
+    print(short_loops)
+
+    causality = calculate_causality(direct_successions, sequences)
+    parallel_events = calculate_parallel_event(direct_successions, sequences)
 
     inv_causality = calculate_inv_causality(causality)
 
@@ -133,17 +166,28 @@ if __name__ == '__main__':
                 G.add_and_split_gateway(event, causality[event])
             else:
                 G.add_xor_split_gateway(event, causality[event])
+        else:
+            source = list(causality[event])[0]
+            if event in short_loops.keys():
+                for (prev, next) in short_loops[event]:
+                    G.add_xor_split_gateway(event, [next, event])
 
     # adding merge gateways based on inverted causality
     for event in inv_causality:
         if len(inv_causality[event]) > 1:
+
             if tuple(inv_causality[event]) in parallel_events:
                 G.add_and_merge_gateway(inv_causality[event], event)
             else:
                 G.add_xor_merge_gateway(inv_causality[event], event)
         elif len(inv_causality[event]) == 1:
             source = list(inv_causality[event])[0]
-            G.edge(source, event)
+            if event in short_loops.keys():
+                for (prev, next) in short_loops[event]:
+                    G.edge(prev, event)
+                    G.add_xor_split_gateway(event, [next, event])
+            elif source not in short_loops.keys():
+                G.edge(source, event)
 
     # adding start event
     G.add_event("start")
