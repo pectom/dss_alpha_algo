@@ -1,4 +1,5 @@
 from bpmnalphatemplate import MyGraph
+from more_itertools import pairwise, first, last
 
 
 def determine_all_successors(direct_succession):
@@ -21,6 +22,7 @@ def determine_start_set_events(direct_succession):
     return direct_succession.keys() - determine_all_successors(direct_succession)
 
 
+# a -> b <=> ...ab... and not ...ba...
 def calculate_causality(direct_succession):
     causality = {}
     events = determine_all_events(direct_succession)
@@ -34,6 +36,7 @@ def calculate_causality(direct_succession):
     return causality
 
 
+# a || b <=>
 def calculate_parallel_event(direct_succession):
     parallel_events = set()
     events = determine_all_events(direct_succession)
@@ -45,6 +48,7 @@ def calculate_parallel_event(direct_succession):
     return parallel_events
 
 
+# a inv-> b
 def calculate_inv_causality(causality):
     inv_causality = {}
     for key, value in causality.items():
@@ -56,25 +60,67 @@ def calculate_inv_causality(causality):
     return inv_causality
 
 
+# a /\ b <=> ...aba...
+def calculate_subsequences(log):
+    subsequences = {}
+    for trace in log:
+        triples = [[trace[i], trace[i + 1], trace[i + 2]] for i in range(len(trace) - 2)]
+        for triple in triples:
+            if triple[0] == triple[2] and triple[0] != triple[1]:
+                if triple[0] not in subsequences.keys():
+                    subsequences[triple[0]] = set()
+                subsequences[triple[0]].add(triple[1])
+    return subsequences
+
+
+def calculate_sequences(log):
+    sequences = {}
+    subsequences = calculate_subsequences(log)
+    for event1 in subsequences.keys():
+        for event2 in subsequences[event1]:
+            if event2 in subsequences.keys() and event1 in subsequences[event2]:
+                if event1 not in sequences.keys():
+                    sequences[event1] = set()
+                sequences[event1].add(event2)
+    return sequences
+
+
+def calculate_direct_succession(log):
+    direct_succession = {}
+    for trace in log:
+        for event_pair in pairwise(trace):
+            if first(event_pair) not in direct_succession.keys():
+                direct_succession[first(event_pair)] = set()
+            direct_succession[first(event_pair)].add(last(event_pair))
+    return direct_succession
+
+
 if __name__ == '__main__':
-    direct_successions = {
-        'a': {'b', 'f'},
-        'b': {'c', 'd'},
-        'c': {'d', 'e'},
-        'd': {'c', 'e'},
-        'e': {'h'},
-        'f': {'g'},
-        'g': {'h'},
-        'h': {'i', 'j'},
-        'i': {'k'},
-        'j': {'k'}
-    }
+    log = [
+        ['x', 'a', 'y'],
+        ['x', 'a', 'b', 'a', 'y'],
+        ['x', 'a', 'b', 'a', 'b', 'a', 'y'],
+    ]
+
+    # log = [
+    #     ['a', 'b', 'c', 'd', 'e', 'g'],
+    #     ['a', 'b', 'c', 'd', 'f', 'g'],
+    #     ['a', 'c', 'b', 'd', 'e', 'g'],
+    #     ['a', 'c', 'b', 'd', 'f', 'g'],
+    # ]
+
+    direct_successions = calculate_direct_succession(log)
 
     causality = calculate_causality(direct_successions)
     parallel_events = calculate_parallel_event(direct_successions)
 
     start_set_events = determine_start_set_events(direct_successions)
     end_set_events = determine_end_set_events(direct_successions)
+
+    subsequences = calculate_subsequences(log)
+    print(subsequences)
+    sequences = calculate_sequences(log)
+    print(sequences)
 
     inv_causality = calculate_inv_causality(causality)
 
