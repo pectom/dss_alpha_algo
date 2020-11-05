@@ -31,12 +31,24 @@ class MyGraph(graphviz.Digraph):
         for target in targets:
             super(MyGraph, self).edge(gateway, target)
 
+
     def add_xor_split_gateway(self, source, targets, *args):
         gateway = 'XORs ' + str(source) + '->' + str(targets)
         self.add_xor_gateway(gateway, *args)
         super(MyGraph, self).edge(source, gateway)
         for target in targets:
             super(MyGraph, self).edge(gateway, target)
+
+    def add_loop_gateway(self, source, loop, target,  *args):
+        gateway1 = 'XORs ' + str(source) + ' -> gateway2'
+        gateway2 = 'XORs gateway2 ->' + str(loop)
+        self.add_xor_gateway(gateway1, *args)
+        self.add_xor_gateway(gateway2, *args)
+        super(MyGraph, self).edge(source, gateway1)
+        super(MyGraph, self).edge(gateway1, gateway2)
+        super(MyGraph, self).edge(gateway2, target)
+        super(MyGraph, self).edge(gateway2, loop)
+        super(MyGraph, self).edge(loop, gateway1)
 
     def add_and_merge_gateway(self, sources, target, *args):
         gateway = 'ANDm ' + str(sources) + '->' + str(target)

@@ -1,5 +1,7 @@
 from bpmnalphatemplate import MyGraph
 from more_itertools import pairwise, first, last
+from csv import reader
+from sys import argv
 
 
 def determine_all_successors(direct_succession):
@@ -103,7 +105,9 @@ def calculate_direct_succession(log):
 
 def calculate_short_loops(log):
     events_in_short_loops = {}
+    log_without_loops = []
     for trace in log:
+        trace_without_loops = [trace[0]]
         idx = 0
         while idx < len(trace) - 1:
             if trace[idx] == trace[idx + 1]:
@@ -119,75 +123,63 @@ def calculate_short_loops(log):
                 idx = i
             else:
                 idx += 1
-    return events_in_short_loops
+            trace_without_loops.append(trace[idx])
+        log_without_loops.append(trace_without_loops)
+    return events_in_short_loops, log_without_loops
 
 
 if __name__ == '__main__':
-    log = [
-        ['x', 'a', 'y'],
-        ['x', 'a', 'b', 'a', 'y'],
-        ['x', 'a', 'b', 'a', 'b', 'a', 'y'],
-        ['x', 'a', 'a', 'a', 'y'],
-        ['x', 'a', 'a', 'y'],
-        ['x', 'y'],
-    ]
+    with open(argv[1]) as file:
+        x = reader(file)
+        log = list(x)
 
-    # log = [
-    #     ['a', 'b', 'c', 'd', 'e', 'g'],
-    #     ['a', 'b', 'c', 'd', 'f', 'g'],
-    #     ['a', 'c', 'b', 'd', 'e', 'g'],
-    #     ['a', 'c', 'b', 'd', 'f', 'g'],
-    # ]
+    short_loops, log_without_loops = calculate_short_loops(log)
 
-    direct_successions = calculate_direct_succession(log)
+    direct_successions = calculate_direct_succession(log_without_loops)
 
     start_set_events = determine_start_set_events(direct_successions)
+
     end_set_events = determine_end_set_events(direct_successions)
 
-    subsequences = calculate_subsequences(log)
-    print(subsequences)
-    sequences = calculate_sequences(log)
-    print(sequences)
+    subsequences = calculate_subsequences(log_without_loops)
 
-    short_loops = calculate_short_loops(log)
-    print(short_loops)
+    sequences = calculate_sequences(log_without_loops)
 
     causality = calculate_causality(direct_successions, sequences)
+
     parallel_events = calculate_parallel_event(direct_successions, sequences)
 
     inv_causality = calculate_inv_causality(causality)
 
     G = MyGraph()
 
+    loop_events = set()
+    for event in short_loops.keys():
+        for (prev, next) in short_loops[event]:
+            loop_events.add(prev)
+            loop_events.add(next)
+
     # adding split gateways based on causality
     for event in causality:
-        if len(causality[event]) > 1:
-            if tuple(causality[event]) in parallel_events:
-                G.add_and_split_gateway(event, causality[event])
-            else:
-                G.add_xor_split_gateway(event, causality[event])
-        else:
-            source = list(causality[event])[0]
-            if event in short_loops.keys():
-                for (prev, next) in short_loops[event]:
-                    G.add_xor_split_gateway(event, [next, event])
+        if event not in short_loops.keys():
+            if len(causality[event]) > 1 and event not in loop_events:
+                if tuple(causality[event]) in parallel_events:
+                    G.add_and_split_gateway(event, causality[event])
+                else:
+                    G.add_xor_split_gateway(event, causality[event])
 
     # adding merge gateways based on inverted causality
     for event in inv_causality:
-        if len(inv_causality[event]) > 1:
-
-            if tuple(inv_causality[event]) in parallel_events:
-                G.add_and_merge_gateway(inv_causality[event], event)
-            else:
-                G.add_xor_merge_gateway(inv_causality[event], event)
-        elif len(inv_causality[event]) == 1:
-            source = list(inv_causality[event])[0]
-            if event in short_loops.keys():
-                for (prev, next) in short_loops[event]:
-                    G.edge(prev, event)
-                    G.add_xor_split_gateway(event, [next, event])
-            elif source not in short_loops.keys():
-                G.edge(source, event)
+        if event not in short_loops.keys():
+            if len(inv_causality[event]) > 1:
+                if tuple(inv_causality[event]) in parallel_events:
+                    G.add_and_merge_gateway(inv_causality[event], event)
+                else:
+                    G.add_xor_merge_gateway(inv_causality[event], event)
+            elif len(inv_causality[event]) == 1:
+                source = list(inv_causality[event])[0]
+                if source not in short_loops.keys():
+                    G.edge(source, event)
 
     # adding start event
     G.add_event("start")
@@ -208,6 +200,16 @@ if __name__ == '__main__':
             G.add_xor_merge_gateway(end_set_events, event)
     else:
         G.edge(list(end_set_events)[0], "end")
+
+    # draw loops
+    for event in short_loops.keys():
+        for (prev, next) in short_loops[event]:
+            if next in direct_successions[prev]:
+                G.add_loop_gateway(prev, event, next)
+            else:
+                G.edge(prev, event)
+                G.add_xor_split_gateway(event, [next, event])
+
 
     G.render('simple_graphviz_graph')
     G.view('simple_graphviz_graph')
