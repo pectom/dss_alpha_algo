@@ -1,4 +1,6 @@
-from bpmnalphatemplate import MyGraph
+#!/usr/bin/env python3
+
+from AlphaPlusGraph import AlphaPlusGraph
 from more_itertools import pairwise, first, last
 from csv import reader
 from sys import argv
@@ -51,7 +53,7 @@ def calculate_parallel_event(direct_succession, sequences):
         for event2 in events:
             if event1 in direct_succession.keys() and event2 in direct_succession[event1]:
                 if event2 in direct_succession.keys() and event1 in direct_succession[event2]:
-                    if event1 in sequences.keys() and event2 not in sequences[event1]:
+                    if event1 not in sequences.keys() or event2 not in sequences[event1]:
                         parallel_events.add((event1, event2))
     return parallel_events
 
@@ -113,7 +115,6 @@ def calculate_short_loops(log):
             if trace[idx] == trace[idx + 1]:
                 previous = trace[idx - 1]
                 i = idx
-                # TODO border cases (aaax, xaaa)
                 while trace[i] == trace[idx]:
                     i += 1
                 next = trace[i]
@@ -129,7 +130,8 @@ def calculate_short_loops(log):
 
 
 if __name__ == '__main__':
-    with open(argv[1]) as file:
+    log_file = argv[1]
+    with open(log_file) as file:
         x = reader(file)
         log = list(x)
 
@@ -151,7 +153,7 @@ if __name__ == '__main__':
 
     inv_causality = calculate_inv_causality(causality)
 
-    G = MyGraph()
+    G = AlphaPlusGraph()
 
     loop_events = set()
     for event in short_loops.keys():
@@ -183,16 +185,18 @@ if __name__ == '__main__':
 
     # adding start event
     G.add_event("start")
+    event = "start"
     if len(start_set_events) > 1:
         if tuple(start_set_events) in parallel_events:
-            G.add_and_split_gateway(event, start_set_events)
-        else:
             G.add_xor_split_gateway(event, start_set_events)
+        else:
+            G.add_and_split_gateway(event, start_set_events)
     else:
         G.edge("start", list(start_set_events)[0])
 
     # adding end event
     G.add_event("end")
+    event = "end"
     if len(end_set_events) > 1:
         if tuple(end_set_events) in parallel_events:
             G.add_and_merge_gateway(end_set_events, event)
@@ -209,7 +213,11 @@ if __name__ == '__main__':
             else:
                 G.edge(prev, event)
                 G.add_xor_split_gateway(event, [next, event])
+            if next in loop_events and next in causality.keys():
+                if tuple(causality[next]) in parallel_events:
+                    G.add_and_split_gateway(next, causality[next])
+                else:
+                    G.add_xor_split_gateway(next, causality[next])
 
 
-    G.render('simple_graphviz_graph')
-    G.view('simple_graphviz_graph')
+    G.render(f"graph", directory="./graphs", cleanup=True)
